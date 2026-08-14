@@ -1,30 +1,55 @@
 # Wifi Water Bottle
 
-A Raspberry Pi mounted in a water bottle for war driving or other wireless network experiments. The Pi is powered by a battery pack and can be controlled remotely via the included bottle-tui application.
+A Raspberry Pi mounted in a water bottle for war driving or other wireless network experiments. The Pi is powered by a battery pack and controlled remotely via `bottle-tui`, a terminal app that runs on your laptop.
 
 ## Links
 
 - [Project Page on hydrox.fun](https://hydrox.fun/projects/dew-the-wifi/)
 - [Printables](https://www.printables.com/model/1167677-wifi-water-bottle-skeleton)
+- [Pi setup (one time per Pi)](docs/pi-setup.md)
 - [Integrated client workflow status](docs/integration-status.md)
 - [Pi provision/update hardware test](docs/pi-provision-update-test.md)
 - [Secure Kismet tunnel contract](docs/kismet-tunnel.md)
 
-## Pi control-plane workflow
+## Getting started
 
-The laptop operator path uses a typed JSON-framed RPC over TLS 1.3 mTLS. The Pi endpoint is fixed at `10.77.0.1:7443`; the client certificate, private key, and pinned CA are loaded from the OS secure store. Pairing is accepted only while the Pi's physical pairing window is open.
+**1. Set up the Pi (once per Pi).** Flash it, install `bottle-agent`, and pair a laptop profile — all local, no network round-trip. Full walkthrough: [docs/pi-setup.md](docs/pi-setup.md).
+
+**2. Import the profile on your laptop:**
 
 ```sh
 cd bottle-tui
-go run . control profile import --ca pi-ca.pem --cert laptop-cert.pem --key laptop-key.pem --id laptop-profile
+go run . control profile import --ca ca.pem --cert client-cert.pem --key client-key.pem --id laptop-profile
+```
+
+(the exact command, with real file paths, is printed at the end of Pi setup)
+
+**3. Day to day: plug in the direct Ethernet cable and launch the TUI.**
+
+```sh
+cd bottle-tui
+go run .
+```
+
+That's the interactive console — dashboard, provision, update, survey with live logs, Kismet tunnel, and WiGLE screens. See [docs/integration-status.md](docs/integration-status.md) for keybindings.
+
+## Pi control-plane workflow
+
+The laptop operator path uses a typed JSON-framed RPC over TLS 1.3 mTLS. The Pi endpoint is fixed at `10.77.0.1:7443`; the client certificate, private key, and pinned CA are loaded from the OS secure store.
+
+Everything above is also available as scripted, non-interactive commands — useful for automation or the hardware test procedure:
+
+```sh
+cd bottle-tui
 go run . control provision --request-id provision-2026-08-14 --confirm
 go run . control survey start --confirm
 go run . control logs
 go run . control tunnel --port 2501
 ```
 
-The tunnel is deliberately limited to laptop `127.0.0.1` and Pi Kismet literal loopback. There is no arbitrary remote-shell operation. See `docs/integration-status.md` and `docs/pi-provision-update-test.md` for the direct-Ethernet procedure.
+The tunnel is deliberately limited to laptop `127.0.0.1` and the Pi's Kismet literal loopback — there is no arbitrary remote-shell operation. See [docs/integration-status.md](docs/integration-status.md) and [docs/pi-provision-update-test.md](docs/pi-provision-update-test.md) for the full direct-Ethernet procedure.
 
+## WiGLE export and upload
 
 `bottle-tui` accepts a portable JSON array of Wi-Fi observations (`bssid`, `ssid`, `auth_mode`, `first_seen` in RFC3339, `channel`, `frequency_mhz`, `rssi`, `latitude`, `longitude`, `altitude_meters`, and `accuracy_meters`). It validates records, lowercases BSSIDs, preserves supplied UTC timestamps and location metadata, and reports skipped malformed records before any action.
 

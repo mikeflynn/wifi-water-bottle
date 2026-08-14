@@ -8,12 +8,12 @@ This procedure exercises the Pi-side lifecycle workflow after the mTLS control-p
 - `eth0` is configured as `10.77.0.1/30`; laptop is `10.77.0.2/30`. Neither side takes a default route from this link.
 - At least 2 GiB free storage; one supported radio and visible GPS hardware.
 - `bottle-agent` runs as root, owns `/var/lib/bottle-agent` and `/var/log/bottle-agent`, and its typed control-plane listener is limited to `10.77.0.1:7443` with TLS 1.3 mTLS (not gRPC and not a remote shell).
-- Signed update manifests are verified with the release trust root before calling the lifecycle updater. Do not bypass verification for a local test artifact.
+- Signed update manifests are verified with the release trust root before calling the lifecycle updater. Do not bypass verification for a local test artifact. (Currently `internal/agent.Handler.Update` is a stub pending a release-publishing/signing pipeline — this precondition applies once that lands.)
 
 ## Fresh Pi
 
-1. Flash Bookworm 64-bit, configure the static `eth0` address, and boot with Ethernet connected.
-2. Pair from the laptop during an explicitly opened, physical pairing window. Verify the displayed Pi fingerprint out of band.
+1. Flash Bookworm 64-bit, install `bottle-agent`, run `bottle-agent setup --profile <name>`, and configure the static `eth0` address — see `docs/pi-setup.md`. Boot with Ethernet connected.
+2. Import the profile in `bottle-tui` (`control profile import`). Pairing already happened locally during `setup`; there is no separate runtime pairing step.
 3. In the TUI, choose `Provision`. Inspect the plan, including package list and proposed config paths, then explicitly confirm.
 4. Observe durable phases: `preflight`, `backup`, `packages`, `configure`, `services`, `health`, `complete`.
 5. Verify `systemctl is-active bottle-agent kismet`; verify Kismet listens only on loopback (`ss -ltnp`); verify `bottle-agent` only listens at `10.77.0.1:7443`; verify owner-only modes for config, credentials, and state.

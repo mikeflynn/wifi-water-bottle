@@ -1,0 +1,15 @@
+[Unit]
+Description=bottle-agent wardriving control plane
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/bottle-agent/pki/server-cert.pem
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/bottle-agent
+Restart=on-failure
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
