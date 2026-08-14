@@ -6,8 +6,25 @@ A Raspberry Pi mounted in a water bottle for war driving or other wireless netwo
 
 - [Project Page on hydrox.fun](https://hydrox.fun/projects/dew-the-wifi/)
 - [Printables](https://www.printables.com/model/1167677-wifi-water-bottle-skeleton)
+- [Integrated client workflow status](docs/integration-status.md)
+- [Pi provision/update hardware test](docs/pi-provision-update-test.md)
+- [Secure Kismet tunnel contract](docs/kismet-tunnel.md)
 
-## WiGLE export and upload
+## Pi control-plane workflow
+
+The laptop operator path uses a typed JSON-framed RPC over TLS 1.3 mTLS. The Pi endpoint is fixed at `10.77.0.1:7443`; the client certificate, private key, and pinned CA are loaded from the OS secure store. Pairing is accepted only while the Pi's physical pairing window is open.
+
+```sh
+cd bottle-tui
+go run . control profile import --ca pi-ca.pem --cert laptop-cert.pem --key laptop-key.pem --id laptop-profile
+go run . control provision --request-id provision-2026-08-14 --confirm
+go run . control survey start --confirm
+go run . control logs
+go run . control tunnel --port 2501
+```
+
+The tunnel is deliberately limited to laptop `127.0.0.1` and Pi Kismet literal loopback. There is no arbitrary remote-shell operation. See `docs/integration-status.md` and `docs/pi-provision-update-test.md` for the direct-Ethernet procedure.
+
 
 `bottle-tui` accepts a portable JSON array of Wi-Fi observations (`bssid`, `ssid`, `auth_mode`, `first_seen` in RFC3339, `channel`, `frequency_mhz`, `rssi`, `latitude`, `longitude`, `altitude_meters`, and `accuracy_meters`). It validates records, lowercases BSSIDs, preserves supplied UTC timestamps and location metadata, and reports skipped malformed records before any action.
 
