@@ -6,6 +6,9 @@ A Raspberry Pi mounted in a water bottle for war driving or other wireless netwo
 
 - [Project Page on hydrox.fun](https://hydrox.fun/projects/dew-the-wifi/)
 - [Printables](https://www.printables.com/model/1167677-wifi-water-bottle-skeleton)
+- [Integrated client workflow status](docs/integration-status.md)
+- [Pi provision/update hardware test](docs/pi-provision-update-test.md)
+- [Secure Kismet tunnel contract](docs/kismet-tunnel.md)
 
 ## WiGLE export and upload
 
