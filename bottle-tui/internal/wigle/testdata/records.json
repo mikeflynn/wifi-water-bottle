@@ -1,0 +1,22 @@
+[
+  {
+    "bssid": "AA:BB:CC:DD:EE:FF",
+    "ssid": "Cafe, WiFi",
+    "auth_mode": "[WPA2-PSK-CCMP][ESS]",
+    "first_seen": "2026-08-14T12:30:45Z",
+    "channel": 36,
+    "frequency_mhz": 5180,
+    "rssi": -57,
+    "latitude": 34.1683,
+    "longitude": -118.6059,
+    "altitude_meters": 250,
+    "accuracy_meters": 5.5
+  },
+  {
+    "bssid": "invalid",
+    "ssid": "bad record",
+    "first_seen": "2026-08-14T12:30:45Z",
+    "latitude": 34.1683,
+    "longitude": -118.6059
+  }
+]
