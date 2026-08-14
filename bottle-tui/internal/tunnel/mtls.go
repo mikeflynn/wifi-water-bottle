@@ -1,25 +1,29 @@
 package tunnel
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 )
 
-// MTLSStreamOpener creates tunnel streams over the Pi control-plane's mTLS
-// endpoint. The caller supplies credentials retrieved from the OS secure store;
-// this type never persists or logs keys, certificates, or CA material.
 type MTLSStreamOpener struct {
 	address string
 	config  *tls.Config
 	dialer  net.Dialer
 }
 
-// NewMTLSStreamOpener rejects configurations that could silently downgrade the
-// authenticated tunnel to a system-trusted or anonymous TLS connection.
+type bufferedConn struct {
+	net.Conn
+	reader *bufio.Reader
+}
+
+func (c *bufferedConn) Read(p []byte) (int, error) { return c.reader.Read(p) }
+
 func NewMTLSStreamOpener(address string, config *tls.Config) (*MTLSStreamOpener, error) {
 	if _, _, err := net.SplitHostPort(address); err != nil {
 		return nil, fmt.Errorf("invalid Pi control-plane address: %w", err)
@@ -40,10 +44,6 @@ func NewMTLSStreamOpener(address string, config *tls.Config) (*MTLSStreamOpener,
 	}
 	return &MTLSStreamOpener{address: address, config: clone}, nil
 }
-
-// Open performs a new TLS 1.3 handshake for each local browser connection. The
-// server is authenticated against the profile-pinned Pi CA and the client
-// certificate identifies a paired, authorized laptop device.
 func (o *MTLSStreamOpener) Open(ctx context.Context) (io.ReadWriteCloser, error) {
 	conn, err := o.dialer.DialContext(ctx, "tcp", o.address)
 	if err != nil {
@@ -54,11 +54,38 @@ func (o *MTLSStreamOpener) Open(ctx context.Context) (io.ReadWriteCloser, error)
 		_ = conn.Close()
 		return nil, fmt.Errorf("mTLS tunnel handshake: %w", err)
 	}
-	return tlsConn, nil
+	reader := bufio.NewReader(tlsConn)
+	dec := json.NewDecoder(reader)
+	enc := json.NewEncoder(tlsConn)
+	if err := enc.Encode(map[string]any{"type": "hello", "version": "bottle-control/1"}); err != nil {
+		_ = tlsConn.Close()
+		return nil, fmt.Errorf("send tunnel hello: %w", err)
+	}
+	var ack struct {
+		Type  string `json:"type"`
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := dec.Decode(&ack); err != nil || !ack.OK {
+		_ = tlsConn.Close()
+		if err != nil {
+			return nil, fmt.Errorf("read tunnel hello: %w", err)
+		}
+		return nil, fmt.Errorf("tunnel hello rejected: %s", ack.Error)
+	}
+	if err := enc.Encode(map[string]any{"type": "request", "version": "bottle-control/1", "id": "kismet-stream", "op": "tunnel"}); err != nil {
+		_ = tlsConn.Close()
+		return nil, fmt.Errorf("select Kismet tunnel: %w", err)
+	}
+	if err := dec.Decode(&ack); err != nil || !ack.OK {
+		_ = tlsConn.Close()
+		if err != nil {
+			return nil, fmt.Errorf("read Kismet selection: %w", err)
+		}
+		return nil, fmt.Errorf("Kismet tunnel rejected: %s", ack.Error)
+	}
+	return &bufferedConn{Conn: tlsConn, reader: reader}, nil
 }
-
-// PinnedRoots constructs a private CA pool for profile construction. It rejects
-// malformed PEM rather than falling back to the system root store.
 func PinnedRoots(caPEM []byte) (*x509.CertPool, error) {
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(caPEM) {

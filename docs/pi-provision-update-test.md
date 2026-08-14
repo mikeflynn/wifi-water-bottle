@@ -7,7 +7,7 @@ This procedure exercises the Pi-side lifecycle workflow after the mTLS control-p
 - Raspberry Pi 4 or 5, 64-bit Raspberry Pi OS Bookworm, arm64.
 - `eth0` is configured as `10.77.0.1/30`; laptop is `10.77.0.2/30`. Neither side takes a default route from this link.
 - At least 2 GiB free storage; one supported radio and visible GPS hardware.
-- `bottle-agent` runs as root, owns `/var/lib/bottle-agent` and `/var/log/bottle-agent`, and its gRPC listener is limited to `10.77.0.1:7443` with TLS 1.3 mTLS.
+- `bottle-agent` runs as root, owns `/var/lib/bottle-agent` and `/var/log/bottle-agent`, and its typed control-plane listener is limited to `10.77.0.1:7443` with TLS 1.3 mTLS (not gRPC and not a remote shell).
 - Signed update manifests are verified with the release trust root before calling the lifecycle updater. Do not bypass verification for a local test artifact.
 
 ## Fresh Pi

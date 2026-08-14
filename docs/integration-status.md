@@ -8,6 +8,7 @@ The feature modules are now present in one worktree and build together:
 - `bottle-tui/internal/model`: bounded, redacted, reconnect-aware live-event state.
 - `bottle-tui/internal/wigle`: WiGLE CSV v1.6 export and confirmation-gated upload.
 - `bottle-tui/internal/provisioncontrol`: confirmation and request-ID guard for typed remote control calls.
+- `bottle-agent/internal/controlplane` and `bottle-tui/internal/controlplane`: TLS 1.3 mTLS JSON-framed typed RPC, physical-window pairing allowlist, secure keyring profile loading, cursor event subscription, and lifecycle/survey/status dispatch.
 
 ## Operator sequence (authorized equipment only)
 
@@ -27,11 +28,28 @@ The feature modules are now present in one worktree and build together:
 
 7. Request a signed update with a stable request ID. On any failed health check, confirm the agent reports `UPDATE_ROLLED_BACK` and preserves state, logs, exports, and configuration.
 
+## Laptop operator commands
+
+Pairing is a physical-window operation: the Pi service calls `OpenPhysicalWindow`, records the laptop certificate SHA-256 fingerprint with `Pair`, then calls `ClosePhysicalWindow`. The persistent allowlist is owner-only JSON state; no private key is stored on the Pi. Laptop CA/client material is imported once and then loaded only from the operating-system keychain.
+
+```sh
+cd bottle-tui
+go run . control profile import --ca pi-ca.pem --cert laptop-cert.pem --key laptop-key.pem --id laptop-profile
+go run . control provision --request-id provision-2026-08-14 --confirm
+go run . control update --request-id update-2026-08-14 --version v2 --channel stable --confirm
+go run . control survey start --confirm
+go run . control logs
+go run . control survey stop --confirm
+go run . control tunnel --port 2501
+```
+
+Provisioning and updates require stable request IDs and explicit confirmation. The tunnel binds only to `127.0.0.1`; the Pi endpoint is fixed at `10.77.0.1:7443`.
+
 ## Current integration gate
 
-The repository does not contain the typed TLS/mTLS control-plane listener, pairing/profile store, generated RPC client, or event-stream transport that connect the listed components. In particular, `provisioncontrol.Client` is only an interface, `model.Stream` is transport-independent, and `MTLSStreamOpener` can only open a raw TLS stream; no protocol selects provisioning, update, survey, event, or Kismet operations after the handshake.
+The transport is now implemented as a small typed JSON-framed protocol over TLS 1.3 mTLS. The remaining hardware gate is physical: a real Pi must be connected on the dedicated Ethernet link, have its physical pairing window opened, and be verified out of band before claiming deployment success.
 
-Consequently, the sequence above is the required contract, not an executable end-to-end laptop command path yet. Do not claim an Ethernet hardware test has passed until that transport is implemented and a Pi is physically connected. On this Mac, verification found no `10.77.0.0/30` route or Pi management endpoint.
+Consequently, the sequence above is an executable laptop command path when a keychain profile and paired Pi are present, but it is not a hardware acceptance result. Do not claim an Ethernet hardware test has passed until a Pi is physically connected. On this Mac, verification found no `10.77.0.0/30` route or Pi management endpoint.
 
 ## Automated verification available now
 
