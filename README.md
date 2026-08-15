@@ -13,9 +13,15 @@ A Raspberry Pi mounted in a water bottle for war driving or other wireless netwo
 
 ## Getting started
 
-**1. Set up the Pi (once per Pi).** Flash it, install `bottle-agent`, and pair a laptop profile — all local, no network round-trip. Full walkthrough: [docs/pi-setup.md](docs/pi-setup.md).
+**1. Set up the Pi (once per Pi).** Flash it, get SSH access, then from this repo:
 
-**2. Import the profile on your laptop:**
+```sh
+./deploy/bootstrap-pi.sh <user>@<pi-hostname>.local
+```
+
+That installs `bottle-agent`, pairs a laptop profile (all local, no network round-trip), configures the direct Ethernet link, and imports the profile into your credential store. Full walkthrough, including doing it by hand: [docs/pi-setup.md](docs/pi-setup.md).
+
+**2. Import the profile on your laptop** — the bootstrap script already did this. By hand:
 
 ```sh
 cd bottle-tui

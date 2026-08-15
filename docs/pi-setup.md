@@ -4,15 +4,43 @@ This is the one-time bootstrap that gets a fresh Raspberry Pi from "flashed SD c
 
 Sized for a single personal rig or a hobbyist building their own from the [Printables files](https://www.printables.com/model/1167677-wifi-water-bottle-skeleton) — not a fleet. No GPIO button, no separate pairing ceremony: everything happens locally over one SSH session.
 
-## 1. Flash and get SSH access
+## Flash and get SSH access
 
 Flash Raspberry Pi OS **Bookworm, 64-bit**. In Raspberry Pi Imager, use "Edit Settings" before writing to set a hostname, enable SSH, and configure WiFi (or plug into your LAN with Ethernet) — this gets you SSH access on first boot without a monitor/keyboard. This network connection is temporary, just for this setup session.
+
+**Connect over WiFi if you can.** The bootstrap reconfigures `eth0` into the dedicated laptop link, so an SSH session arriving over Ethernet is a session the setup would cut. Both the script and the manual path handle this, but WiFi avoids the detour.
 
 ```sh
 ssh <user>@<pi-hostname-or-ip>.local
 ```
 
-## 2. Build and install the bottle-agent binary
+## The automated path
+
+From your laptop, at the repo root:
+
+```sh
+./deploy/bootstrap-pi.sh <user>@<pi-hostname-or-ip>.local
+```
+
+That does everything below in one pass: cross-compiles the agent, installs it with its systemd unit, generates the CA and certificates, pairs a laptop profile, configures the direct Ethernet link and its DHCP server, starts the service, then copies the profile back and imports it into your Mac's credential store.
+
+It needs Go on your laptop and passwordless sudo on the Pi. It's safe to re-run — the binary is upgraded in place and an existing CA and profile are reused, not replaced.
+
+Useful flags:
+
+- `--profile NAME` — pair a second laptop (`--profile work-laptop`). Reuses the existing CA; just adds a pairing.
+- `--skip-import` — copy the profile to `~/NAME` but leave the credential-store import to you.
+- `--iface IFACE` — use something other than `eth0` for the direct link.
+
+If the script reports that it **skipped** the interface step, your SSH session was arriving over `eth0` and reconfiguring it would have disconnected you. Everything else is installed; run the commands it printed from a local console (or reconnect over WiFi and re-run).
+
+Then skip to [Day to day](#day-to-day-after-this).
+
+## The manual path
+
+Exactly what the script does, if you'd rather do it by hand or need to debug a step.
+
+### 1. Build and install the bottle-agent binary
 
 From your laptop, in this repo:
 
@@ -21,6 +49,7 @@ cd bottle-agent
 GOOS=linux GOARCH=arm64 go build -o bottle-agent .
 scp bottle-agent <user>@<pi>:~/
 scp ../deploy/bottle-agent.service <user>@<pi>:~/
+scp ../deploy/bottle-agent-link.conf <user>@<pi>:~/   # used in step 4
 ```
 
 On the Pi:
@@ -32,9 +61,9 @@ sudo systemctl daemon-reload
 sudo systemctl enable bottle-agent
 ```
 
-`enable` is safe now — the unit has `ConditionPathExists=/etc/bottle-agent/pki/server-cert.pem`, so it won't actually start until after step 3.
+`enable` is safe now — the unit has `ConditionPathExists=/etc/bottle-agent/pki/server-cert.pem`, so it won't actually start until after step 2.
 
-## 3. Generate certs and pair your laptop
+### 2. Generate certs and pair your laptop
 
 Still on the Pi:
 
@@ -50,7 +79,7 @@ Running `setup` again with a different `--profile` name (e.g. for a second lapto
 scp -r bottle-agent-profiles/laptop-profile <you>@<laptop>:~/
 ```
 
-## 4. Import the profile on your laptop
+### 3. Import the profile on your laptop
 
 ```sh
 cd bottle-tui
@@ -61,21 +90,52 @@ go run . control profile import \
   --id laptop-profile
 ```
 
-## 5. Static IP on the direct Ethernet link
+### 4. The direct Ethernet link
 
-This is deliberately a manual, documented step rather than something `setup` does for you automatically — it's the one change that could disconnect an active SSH session if scripted wrong.
+The Pi's address is fixed: `10.77.0.1` is baked into the server certificate's SAN and pinned as the client's expected `ServerName`, so this part is not adjustable. The laptop's address is not pinned to anything, so the Pi hands it out over DHCP and your laptop needs no network configuration at all.
 
-On the Pi (Bookworm uses NetworkManager):
+Run this from a local console, or over WiFi — **not** over an SSH session arriving on `eth0`, which the first command will drop.
 
 ```sh
 sudo nmcli con add type ethernet ifname eth0 con-name bottle-agent-link \
-  ipv4.method manual ipv4.addresses 10.77.0.1/30 ipv4.never-default yes
+  ipv4.method manual ipv4.addresses 10.77.0.1/30 ipv4.never-default yes \
+  ipv6.method disabled connection.autoconnect yes
 sudo nmcli con up bottle-agent-link
 ```
 
-On your Mac laptop: System Settings → Network → (the Ethernet adapter connected to the Pi) → Details → TCP/IP → Configure IPv4: Manually, IP `10.77.0.2`, Subnet Mask `255.255.255.252`, no router.
+Bookworm ships a default `Wired connection 1` profile that will race this one on autoconnect; turn it off:
 
-## 6. Start the service
+```sh
+sudo nmcli con mod "Wired connection 1" connection.autoconnect no
+```
+
+Then the DHCP server. `deploy/bottle-agent-link.conf` is a DHCP-only dnsmasq config — no DNS listener, and it deliberately sends no router and no DNS-server option, because macOS ranks Ethernet above WiFi in service order and an offer carrying a gateway would steal your laptop's default route:
+
+```sh
+sudo apt-get install -y dnsmasq
+sudo install -m 0644 bottle-agent-link.conf /etc/dnsmasq.d/bottle-agent-link.conf
+sudo systemctl enable --now dnsmasq
+sudo systemctl restart dnsmasq
+```
+
+On your Mac, leave the Ethernet adapter on "Using DHCP" — the default. Nothing to configure.
+
+<details>
+<summary>If you'd rather assign the laptop a static IP instead</summary>
+
+Skip dnsmasq entirely and configure the Mac side yourself. In the GUI: System Settings → Network → (the Ethernet adapter connected to the Pi) → Details → TCP/IP → Configure IPv4: Manually, IP `10.77.0.2`, Subnet Mask `255.255.255.252`, no router. Or scriptably:
+
+```sh
+networksetup -listallnetworkservices                       # find the adapter's name
+sudo networksetup -setmanual "USB 10/100/1000 LAN" 10.77.0.2 255.255.255.252
+sudo networksetup -setdhcp   "USB 10/100/1000 LAN"         # to undo
+```
+
+Leaving the router argument off is what keeps this from taking over your default route. Consider making a separate Network Location for it so your normal networking is untouched when you switch back.
+
+</details>
+
+### 5. Start the service
 
 ```sh
 sudo systemctl start bottle-agent
@@ -90,9 +150,13 @@ No SSH, no WiFi needed on the Pi. Plug the direct Ethernet cable into your lapto
 
 `bottle-tui control update` / the TUI's Update screen are wired to the protocol but the agent-side `Update` handler is a deliberate stub (`"update channel resolution is not implemented yet"`) — there's no release-publishing/signing pipeline yet for it to verify against. Provision and Survey are fully wired.
 
+The same gap is why `bootstrap-pi.sh` builds and pushes the binary from your laptop rather than being a `curl … | bash` one-liner: there is no published release artifact for a script on the Pi to fetch.
+
 ## Verification
 
-The Host implementation (`apt-get`/`systemctl`/GPS/radio detection, release staging) is unit-tested for *which* commands it builds, not real execution — there's no Pi, radio, or GPS in CI. Run the existing hardware procedure once this is installed:
+The Host implementation (`apt-get`/`systemctl`/GPS/radio detection, release staging) is unit-tested for *which* commands it builds, not real execution — there's no Pi, radio, or GPS in CI. The bootstrap scripts aren't unit-tested at all, for the same reason: they drive `apt-get`, `nmcli`, and `systemctl` against hardware CI doesn't have.
+
+Run the existing hardware procedure once this is installed:
 
 ```sh
 (cd bottle-agent && go test -race ./... && go vet ./...)

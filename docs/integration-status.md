@@ -29,8 +29,8 @@ Seven screens, switched with `1`-`7`, `]`/`[` (bracket keys always work, even wh
 
 ## Operator sequence (authorized equipment only)
 
-1. One-time per Pi: follow `docs/pi-setup.md` — install `bottle-agent`, run `bottle-agent setup --profile <name>` (generates the CA/certs and pairs the profile locally, no network round-trip), configure the static `eth0` address, and import the profile into `bottle-tui`.
-2. Connect the dedicated Ethernet link; Pi `eth0` is `10.77.0.1/30`, laptop Ethernet is `10.77.0.2/30`, with no default route on either side.
+1. One-time per Pi: run `./deploy/bootstrap-pi.sh <user>@<pi>`, or follow the manual path in `docs/pi-setup.md` — install `bottle-agent`, run `bottle-agent setup --profile <name>` (generates the CA/certs and pairs the profile locally, no network round-trip), configure the static `eth0` address and its DHCP server, and import the profile into `bottle-tui`.
+2. Connect the dedicated Ethernet link; Pi `eth0` is a static `10.77.0.1/30`, and the laptop takes `10.77.0.2/30` by DHCP from the Pi. Neither side takes a default route from this link: the Pi's connection sets `ipv4.never-default`, and the DHCP offer carries no router or DNS option.
 3. Check the typed control-plane readiness, then provision with an explicit confirmation. The Pi must report `preflight`, `backup`, `packages`, `configure`, `services`, `health`, then `complete`.
 4. Start/stop a survey and consume the cursor-based event stream for live logs and status. Treat a `resync_required` event as a visible history gap, not as a silent reconnect.
 5. Start the Kismet tunnel, open its local `http://127.0.0.1:<port>` URL, and close it on exit. Never use a LAN listener or an arbitrary tunnel destination.

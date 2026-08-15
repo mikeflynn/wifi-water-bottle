@@ -5,18 +5,18 @@ This procedure exercises the Pi-side lifecycle workflow after the mTLS control-p
 ## Preconditions
 
 - Raspberry Pi 4 or 5, 64-bit Raspberry Pi OS Bookworm, arm64.
-- `eth0` is configured as `10.77.0.1/30`; laptop is `10.77.0.2/30`. Neither side takes a default route from this link.
+- `eth0` is configured as a static `10.77.0.1/30`; the laptop takes `10.77.0.2/30` by DHCP from the Pi's dnsmasq. Neither side takes a default route from this link.
 - At least 2 GiB free storage; one supported radio and visible GPS hardware.
 - `bottle-agent` runs as root, owns `/var/lib/bottle-agent` and `/var/log/bottle-agent`, and its typed control-plane listener is limited to `10.77.0.1:7443` with TLS 1.3 mTLS (not gRPC and not a remote shell).
 - Signed update manifests are verified with the release trust root before calling the lifecycle updater. Do not bypass verification for a local test artifact. (Currently `internal/agent.Handler.Update` is a stub pending a release-publishing/signing pipeline — this precondition applies once that lands.)
 
 ## Fresh Pi
 
-1. Flash Bookworm 64-bit, install `bottle-agent`, run `bottle-agent setup --profile <name>`, and configure the static `eth0` address — see `docs/pi-setup.md`. Boot with Ethernet connected.
+1. Flash Bookworm 64-bit, then run `./deploy/bootstrap-pi.sh <user>@<pi>` (or the manual equivalent) to install `bottle-agent`, run `bottle-agent setup --profile <name>`, and configure the `eth0` link — see `docs/pi-setup.md`. Boot with Ethernet connected.
 2. Import the profile in `bottle-tui` (`control profile import`). Pairing already happened locally during `setup`; there is no separate runtime pairing step.
 3. In the TUI, choose `Provision`. Inspect the plan, including package list and proposed config paths, then explicitly confirm.
 4. Observe durable phases: `preflight`, `backup`, `packages`, `configure`, `services`, `health`, `complete`.
-5. Verify `systemctl is-active bottle-agent kismet`; verify Kismet listens only on loopback (`ss -ltnp`); verify `bottle-agent` only listens at `10.77.0.1:7443`; verify owner-only modes for config, credentials, and state.
+5. Verify `systemctl is-active bottle-agent kismet`; verify Kismet listens only on loopback (`ss -ltnp`); verify `bottle-agent` only listens at `10.77.0.1:7443`; verify owner-only modes for config, credentials, and state. The one other service reachable on `eth0` is dnsmasq's DHCP server on UDP/67 — `port=0` in `deploy/bottle-agent-link.conf` means it must not be listening on TCP/53 or UDP/53.
 6. Re-run the same request ID after a deliberate laptop reconnect. It must return the original successful job and execute no installation steps a second time.
 
 ## Already-configured Pi and retry safety
