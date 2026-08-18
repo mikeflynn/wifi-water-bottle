@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -59,6 +60,29 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+type gpioConfig struct {
+	chip       string
+	buttonPin  int
+	buttonHold time.Duration
+	ledPin     int
+}
+
+func loadGPIOConfig() (gpioConfig, error) {
+	buttonPin, err := strconv.Atoi(envOr("BOTTLE_AGENT_BUTTON_PIN", "17"))
+	if err != nil {
+		return gpioConfig{}, fmt.Errorf("parse BOTTLE_AGENT_BUTTON_PIN: %w", err)
+	}
+	ledPin, err := strconv.Atoi(envOr("BOTTLE_AGENT_LED_PIN", "27"))
+	if err != nil {
+		return gpioConfig{}, fmt.Errorf("parse BOTTLE_AGENT_LED_PIN: %w", err)
+	}
+	hold, err := time.ParseDuration(envOr("BOTTLE_AGENT_BUTTON_HOLD", "2s"))
+	if err != nil {
+		return gpioConfig{}, fmt.Errorf("parse BOTTLE_AGENT_BUTTON_HOLD: %w", err)
+	}
+	return gpioConfig{chip: "gpiochip0", buttonPin: buttonPin, buttonHold: hold, ledPin: ledPin}, nil
 }
 
 func main() {

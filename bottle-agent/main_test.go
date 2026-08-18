@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mikeflynn/wifi-water-bottle/bottle-agent/internal/controlplane"
 	"github.com/mikeflynn/wifi-water-bottle/bottle-agent/internal/pki"
@@ -155,5 +156,36 @@ func TestStartServiceLoadsValidPKI(t *testing.T) {
 func TestRunServiceCommandRejectsExtraArgs(t *testing.T) {
 	if err := runServiceCommand([]string{"unexpected"}); err == nil {
 		t.Fatalf("expected an error for unexpected arguments")
+	}
+}
+
+func TestLoadGPIOConfigDefaults(t *testing.T) {
+	cfg, err := loadGPIOConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.buttonPin != 17 || cfg.ledPin != 27 || cfg.buttonHold != 2*time.Second {
+		t.Fatalf("unexpected defaults: %+v", cfg)
+	}
+}
+
+func TestLoadGPIOConfigReadsEnvOverrides(t *testing.T) {
+	t.Setenv("BOTTLE_AGENT_BUTTON_PIN", "5")
+	t.Setenv("BOTTLE_AGENT_LED_PIN", "6")
+	t.Setenv("BOTTLE_AGENT_BUTTON_HOLD", "500ms")
+
+	cfg, err := loadGPIOConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.buttonPin != 5 || cfg.ledPin != 6 || cfg.buttonHold != 500*time.Millisecond {
+		t.Fatalf("unexpected config: %+v", cfg)
+	}
+}
+
+func TestLoadGPIOConfigRejectsInvalidPin(t *testing.T) {
+	t.Setenv("BOTTLE_AGENT_BUTTON_PIN", "not-a-number")
+	if _, err := loadGPIOConfig(); err == nil {
+		t.Fatal("expected an error for an invalid button pin")
 	}
 }
