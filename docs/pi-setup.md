@@ -146,6 +146,26 @@ sudo systemctl status bottle-agent
 
 No SSH, no WiFi needed on the Pi. Plug the direct Ethernet cable into your laptop, run `bottle-tui`, and go. `bottle-agent` starts automatically on boot via systemd.
 
+## GPIO power button and GPS-lock LED
+
+Both are optional — if the hardware isn't wired up, `bottle-agent` logs that it's unavailable and starts normally without it.
+
+**Power button** (default BCM pin **17**): wire a plain push button between that pin and a GND pin. `bottle-agent` uses the Pi's internal pull-up, so nothing external is needed — idle is high, pressed pulls the line to GND. Hold it down for **2 seconds** (default) to trigger `systemctl poweroff`; a short tap does nothing.
+
+**GPS-lock LED** (default BCM pin **27**): wire an LED (with an appropriate current-limiting resistor) between that pin and GND. `bottle-agent` drives it high while `gpsd` reports a 3D fix and low otherwise.
+
+Override the defaults with environment variables:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BOTTLE_AGENT_BUTTON_PIN` | `17` | BCM pin the power button is wired to |
+| `BOTTLE_AGENT_BUTTON_HOLD` | `2s` | how long the button must be held to trigger shutdown (Go duration syntax, e.g. `1500ms`) |
+| `BOTTLE_AGENT_LED_PIN` | `27` | BCM pin the GPS-lock LED is wired to |
+
+A malformed value for any one of these falls back to its default (logged, not fatal) — it will never take down the control plane or tunnel.
+
+Since `bottle-agent` runs under systemd, set these by creating `/etc/bottle-agent/env` (one `KEY=value` per line) — the unit loads it via `EnvironmentFile=-/etc/bottle-agent/env` (the leading `-` makes a missing file harmless) — then `sudo systemctl restart bottle-agent`.
+
 ## Known gap
 
 `bottle-tui control update` / the TUI's Update screen are wired to the protocol but the agent-side `Update` handler is a deliberate stub (`"update channel resolution is not implemented yet"`) — there's no release-publishing/signing pipeline yet for it to verify against. Provision and Survey are fully wired.
