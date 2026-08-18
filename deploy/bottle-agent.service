@@ -6,6 +6,7 @@ ConditionPathExists=/etc/bottle-agent/pki/server-cert.pem
 
 [Service]
 Type=simple
+EnvironmentFile=-/etc/bottle-agent/env
 ExecStart=/usr/local/bin/bottle-agent
 Restart=on-failure
 RestartSec=5

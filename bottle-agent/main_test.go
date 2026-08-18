@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mikeflynn/wifi-water-bottle/bottle-agent/internal/controlplane"
 	"github.com/mikeflynn/wifi-water-bottle/bottle-agent/internal/pki"
@@ -111,7 +113,7 @@ func TestDoSetupReusesExistingCAForAdditionalProfiles(t *testing.T) {
 
 func TestStartServiceFailsClearlyBeforeSetupHasRun(t *testing.T) {
 	p := testPaths(t)
-	if _, err := startService(p); err == nil || !strings.Contains(err.Error(), "bottle-agent setup") {
+	if _, err := startService(context.Background(), p); err == nil || !strings.Contains(err.Error(), "bottle-agent setup") {
 		t.Fatalf("expected a clear \"run setup first\" error, got %v", err)
 	}
 }
@@ -129,7 +131,10 @@ func TestStartServiceLoadsValidPKI(t *testing.T) {
 		t.Fatalf("doSetup() error = %v", err)
 	}
 
-	_, err := startService(p)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel) // stops the gpsd fix-watcher goroutine wireGPIO starts
+
+	_, err := startService(ctx, p)
 	if err == nil {
 		t.Fatalf("expected startService to fail in this sandbox (no 10.77.0.1 interface), but it succeeded")
 	}
@@ -155,5 +160,64 @@ func TestStartServiceLoadsValidPKI(t *testing.T) {
 func TestRunServiceCommandRejectsExtraArgs(t *testing.T) {
 	if err := runServiceCommand([]string{"unexpected"}); err == nil {
 		t.Fatalf("expected an error for unexpected arguments")
+	}
+}
+
+func TestLoadGPIOConfigDefaults(t *testing.T) {
+	cfg, warnings := loadGPIOConfig()
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+	if cfg.buttonPin != 17 || cfg.ledPin != 27 || cfg.buttonHold != 2*time.Second {
+		t.Fatalf("unexpected defaults: %+v", cfg)
+	}
+}
+
+func TestLoadGPIOConfigReadsEnvOverrides(t *testing.T) {
+	t.Setenv("BOTTLE_AGENT_BUTTON_PIN", "5")
+	t.Setenv("BOTTLE_AGENT_LED_PIN", "6")
+	t.Setenv("BOTTLE_AGENT_BUTTON_HOLD", "500ms")
+
+	cfg, warnings := loadGPIOConfig()
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+	if cfg.buttonPin != 5 || cfg.ledPin != 6 || cfg.buttonHold != 500*time.Millisecond {
+		t.Fatalf("unexpected config: %+v", cfg)
+	}
+}
+
+// TestLoadGPIOConfigFallsBackToDefaultOnInvalidPin proves a single malformed
+// env var falls back to its default rather than making loadGPIOConfig fail
+// entirely — a config typo must never prevent bottle-agent's control plane
+// and tunnel from starting (see startService's use of loadGPIOConfig).
+func TestLoadGPIOConfigFallsBackToDefaultOnInvalidPin(t *testing.T) {
+	t.Setenv("BOTTLE_AGENT_BUTTON_PIN", "not-a-number")
+	t.Setenv("BOTTLE_AGENT_LED_PIN", "9")
+
+	cfg, warnings := loadGPIOConfig()
+	if cfg.buttonPin != 17 {
+		t.Fatalf("expected buttonPin to fall back to default 17, got %d", cfg.buttonPin)
+	}
+	if cfg.ledPin != 9 {
+		t.Fatalf("expected valid ledPin override to still be honored, got %d", cfg.ledPin)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "BOTTLE_AGENT_BUTTON_PIN") {
+		t.Fatalf("expected exactly one warning mentioning BOTTLE_AGENT_BUTTON_PIN, got %v", warnings)
+	}
+}
+
+// TestLoadGPIOConfigFallsBackToDefaultOnInvalidHold covers the duration
+// field specifically, since it uses a different parser (time.ParseDuration)
+// than the two pin fields (strconv.Atoi).
+func TestLoadGPIOConfigFallsBackToDefaultOnInvalidHold(t *testing.T) {
+	t.Setenv("BOTTLE_AGENT_BUTTON_HOLD", "not-a-duration")
+
+	cfg, warnings := loadGPIOConfig()
+	if cfg.buttonHold != 2*time.Second {
+		t.Fatalf("expected buttonHold to fall back to default 2s, got %v", cfg.buttonHold)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "BOTTLE_AGENT_BUTTON_HOLD") {
+		t.Fatalf("expected exactly one warning mentioning BOTTLE_AGENT_BUTTON_HOLD, got %v", warnings)
 	}
 }

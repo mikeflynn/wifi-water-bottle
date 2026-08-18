@@ -7,16 +7,20 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/mikeflynn/wifi-water-bottle/bottle-agent/internal/agent"
 	"github.com/mikeflynn/wifi-water-bottle/bottle-agent/internal/controlplane"
 	"github.com/mikeflynn/wifi-water-bottle/bottle-agent/internal/eventbus"
+	"github.com/mikeflynn/wifi-water-bottle/bottle-agent/internal/gpio"
+	"github.com/mikeflynn/wifi-water-bottle/bottle-agent/internal/gpsd"
 	"github.com/mikeflynn/wifi-water-bottle/bottle-agent/internal/host"
 	"github.com/mikeflynn/wifi-water-bottle/bottle-agent/internal/lifecycle"
 	"github.com/mikeflynn/wifi-water-bottle/bottle-agent/internal/pki"
@@ -61,6 +65,48 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+type gpioConfig struct {
+	chip       string
+	buttonPin  int
+	buttonHold time.Duration
+	ledPin     int
+}
+
+const (
+	defaultGPIOChip      = "gpiochip0"
+	defaultButtonPin     = 17
+	defaultLEDPin        = 27
+	defaultButtonHoldStr = "2s"
+)
+
+// loadGPIOConfig reads the GPIO env var overrides. A malformed value for a
+// given var falls back to that var's default and is logged by the caller
+// (via the returned per-field warnings) rather than treated as fatal — a
+// typo in one env var must never prevent the rest of bottle-agent (control
+// plane, tunnel) from starting. loadGPIOConfig never returns an error; the
+// second return value collects human-readable descriptions of any values
+// that fell back, for the caller to log.
+func loadGPIOConfig() (gpioConfig, []string) {
+	var warnings []string
+
+	buttonPin, err := strconv.Atoi(envOr("BOTTLE_AGENT_BUTTON_PIN", strconv.Itoa(defaultButtonPin)))
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("BOTTLE_AGENT_BUTTON_PIN invalid (%v), using default %d", err, defaultButtonPin))
+		buttonPin = defaultButtonPin
+	}
+	ledPin, err := strconv.Atoi(envOr("BOTTLE_AGENT_LED_PIN", strconv.Itoa(defaultLEDPin)))
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("BOTTLE_AGENT_LED_PIN invalid (%v), using default %d", err, defaultLEDPin))
+		ledPin = defaultLEDPin
+	}
+	hold, err := time.ParseDuration(envOr("BOTTLE_AGENT_BUTTON_HOLD", defaultButtonHoldStr))
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("BOTTLE_AGENT_BUTTON_HOLD invalid (%v), using default %s", err, defaultButtonHoldStr))
+		hold, _ = time.ParseDuration(defaultButtonHoldStr)
+	}
+	return gpioConfig{chip: defaultGPIOChip, buttonPin: buttonPin, buttonHold: hold, ledPin: ledPin}, warnings
+}
+
 func main() {
 	args := os.Args[1:]
 	var err error
@@ -95,7 +141,10 @@ func runServiceCommand(args []string) error {
 }
 
 func runService(p paths, out io.Writer) error {
-	server, err := startService(p)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	server, err := startService(ctx, p)
 	if err != nil {
 		return err
 	}
@@ -103,8 +152,6 @@ func runService(p paths, out io.Writer) error {
 
 	fmt.Fprintf(out, "bottle-agent listening at %s (Kismet relay -> %s)\n", controlplane.ListenAddress, kismetAddr)
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
 	<-ctx.Done()
 	fmt.Fprintln(out, "shutting down")
 	return nil
@@ -114,7 +161,7 @@ func runService(p paths, out io.Writer) error {
 // constructing the handler, and starting the mTLS listener and Kismet relay
 // — without blocking, so tests can start it, assert it worked, and Close it
 // immediately instead of waiting on an OS signal.
-func startService(p paths) (*controlplane.Server, error) {
+func startService(ctx context.Context, p paths) (*controlplane.Server, error) {
 	caPEM, err := os.ReadFile(p.caCertPath())
 	if err != nil {
 		return nil, fmt.Errorf("read CA (run `bottle-agent setup` first): %w", err)
@@ -147,6 +194,12 @@ func startService(p paths) (*controlplane.Server, error) {
 	provisioner := lifecycle.NewProvisioner(h, jobs)
 	bus := eventbus.New(0)
 	handler := agent.New(provisioner, h, bus)
+
+	gpioCfg, gpioWarnings := loadGPIOConfig()
+	for _, w := range gpioWarnings {
+		log.Printf("gpio: %s", w)
+	}
+	wireGPIO(ctx, gpioCfg, handler)
 
 	server, err := controlplane.Listen(controlplane.ListenAddress, tlsConfig, pairings, handler)
 	if err != nil {
@@ -285,4 +338,48 @@ func ensureServerCert(p paths, ca *pki.CA) error {
 		return fmt.Errorf("write server key: %w", err)
 	}
 	return nil
+}
+
+// wireGPIO starts the power-button and GPS-lock-LED background watchers.
+// Missing GPIO hardware (e.g. running off the Pi) is logged and skipped,
+// not fatal — the rest of the agent must still start. GPS fix state is
+// still tracked via handler.SetGPSFix even if the LED itself is
+// unavailable, so Status/events stay accurate.
+func wireGPIO(ctx context.Context, cfg gpioConfig, handler *agent.Handler) {
+	buttonLine, err := gpio.NewChipInputLine(cfg.chip, cfg.buttonPin)
+	if err != nil {
+		log.Printf("gpio: power button unavailable: %v", err)
+	} else {
+		button := gpio.NewButton(buttonLine, cfg.buttonHold, func() {
+			if err := handler.Shutdown(context.Background()); err != nil {
+				log.Printf("gpio: shutdown command failed: %v", err)
+			}
+		})
+		go func() {
+			if err := button.Run(ctx); err != nil {
+				log.Printf("gpio: power button watcher stopped: %v", err)
+			}
+		}()
+	}
+
+	setLED := func(bool) error { return nil }
+	ledLine, err := gpio.NewChipOutputLine(cfg.chip, cfg.ledPin)
+	if err != nil {
+		log.Printf("gpio: GPS-lock LED unavailable: %v", err)
+	} else {
+		led := gpio.NewLed(ledLine)
+		setLED = led.Set
+	}
+
+	watcher := gpsd.NewFixWatcher("127.0.0.1:2947", func(fix bool) {
+		if err := setLED(fix); err != nil {
+			log.Printf("gpio: set LED failed: %v", err)
+		}
+		handler.SetGPSFix(fix)
+	})
+	go func() {
+		if err := watcher.Run(ctx); err != nil {
+			log.Printf("gpsd: fix watcher stopped: %v", err)
+		}
+	}()
 }

@@ -62,6 +62,6 @@ func FetchStatus(c *Client) model.FetchStatus {
 		if err != nil {
 			return model.StatusSnapshot{}, err
 		}
-		return model.StatusSnapshot{Survey: status.Survey, ObservedAt: time.Now().UTC()}, nil
+		return model.StatusSnapshot{Survey: status.Survey, GPSFix: status.GPSFix, ObservedAt: time.Now().UTC()}, nil
 	}
 }

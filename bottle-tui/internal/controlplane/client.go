@@ -38,6 +38,7 @@ type CredentialStore interface {
 type Status struct {
 	Ready   bool   `json:"ready"`
 	Survey  string `json:"survey"`
+	GPSFix  bool   `json:"gps_fix"`
 	Message string `json:"message"`
 }
 type Event struct{ model.Event }

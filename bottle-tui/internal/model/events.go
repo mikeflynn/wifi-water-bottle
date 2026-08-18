@@ -47,6 +47,7 @@ type Event struct {
 
 type StatusSnapshot struct {
 	Survey     string    `json:"survey"`
+	GPSFix     bool      `json:"gps_fix"`
 	ObservedAt time.Time `json:"observed_at"`
 	Stale      bool      `json:"stale"`
 }
