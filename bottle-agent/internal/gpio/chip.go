@@ -19,7 +19,7 @@ type chipInputLine struct {
 // InputLine that opens it for real, with edge detection, inside
 // WatchEdges.
 func NewChipInputLine(chip string, offset int) (InputLine, error) {
-	probe, err := gpiocdev.RequestLine(chip, offset, gpiocdev.AsInput)
+	probe, err := gpiocdev.RequestLine(chip, offset, gpiocdev.AsInput, gpiocdev.AsActiveLow)
 	if err != nil {
 		return nil, fmt.Errorf("open input line %s:%d: %w", chip, offset, err)
 	}
@@ -31,9 +31,15 @@ func (c *chipInputLine) WatchEdges(ctx context.Context, fn func(active bool)) er
 	handler := func(evt gpiocdev.LineEvent) {
 		fn(evt.Type == gpiocdev.LineEventRisingEdge)
 	}
+	// Assumes the button is wired between the GPIO pin and GND: WithPullUp
+	// biases the idle line high, and AsActiveLow tells the kernel to report
+	// that physically-low (pressed, pulled to GND) state as logically
+	// active. So evt.Type == RisingEdge below correctly means "became
+	// active" (pressed), not "released".
 	line, err := gpiocdev.RequestLine(c.chip, c.offset,
 		gpiocdev.AsInput,
 		gpiocdev.WithPullUp,
+		gpiocdev.AsActiveLow,
 		gpiocdev.WithBothEdges,
 		gpiocdev.WithDebounce(10*time.Millisecond),
 		gpiocdev.WithEventHandler(handler),
