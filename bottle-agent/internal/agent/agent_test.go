@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/mikeflynn/wifi-water-bottle/bottle-agent/internal/eventbus"
 	"github.com/mikeflynn/wifi-water-bottle/bottle-agent/internal/lifecycle"
@@ -147,6 +148,78 @@ func TestSurveyRequiresConfirmation(t *testing.T) {
 	}
 	if len(runner.commands) != 0 {
 		t.Fatalf("expected no command to run without confirmation")
+	}
+}
+
+func TestSetGPSFixPublishesEventOnTransitionAndUpdatesStatus(t *testing.T) {
+	h, _, bus := newHandler()
+	ctx := context.Background()
+	events, err := bus.Subscribe(ctx, 0)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	h.SetGPSFix(true)
+
+	select {
+	case e := <-events:
+		if e.Kind != "gps_fix_acquired" {
+			t.Fatalf("expected gps_fix_acquired, got %s", e.Kind)
+		}
+	default:
+		t.Fatal("expected an event to be published")
+	}
+
+	status, err := h.Status(ctx)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !status.GPSFix {
+		t.Fatal("expected Status().GPSFix to be true")
+	}
+}
+
+func TestSetGPSFixDoesNotRepublishOnNoChange(t *testing.T) {
+	h, _, bus := newHandler()
+	ctx := context.Background()
+	h.SetGPSFix(true)
+
+	events, err := bus.Subscribe(ctx, 1) // after the first (setup) event
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	h.SetGPSFix(true) // no transition, should not publish
+
+	select {
+	case e := <-events:
+		t.Fatalf("expected no event on unchanged fix state, got %+v", e)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestShutdownPublishesEventAndRunsPoweroff(t *testing.T) {
+	h, runner, bus := newHandler()
+	ctx := context.Background()
+	events, err := bus.Subscribe(ctx, 0)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	if err := h.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+
+	if len(runner.commands) != 1 || runner.commands[0] != "systemctl poweroff" {
+		t.Fatalf("expected systemctl poweroff to run, got %v", runner.commands)
+	}
+
+	select {
+	case e := <-events:
+		if e.Kind != "power_button_shutdown" {
+			t.Fatalf("expected power_button_shutdown, got %s", e.Kind)
+		}
+	default:
+		t.Fatal("expected an event to be published")
 	}
 }
 

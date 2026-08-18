@@ -36,6 +36,7 @@ type Handler struct {
 
 	mu          sync.Mutex
 	surveyState string
+	gpsFix      bool
 }
 
 func New(provisioner *lifecycle.Provisioner, runner Runner, bus *eventbus.Bus) *Handler {
@@ -45,8 +46,9 @@ func New(provisioner *lifecycle.Provisioner, runner Runner, bus *eventbus.Bus) *
 func (h *Handler) Status(context.Context) (controlplane.Status, error) {
 	h.mu.Lock()
 	survey := h.surveyState
+	gpsFix := h.gpsFix
 	h.mu.Unlock()
-	return controlplane.Status{Ready: true, Survey: survey, Message: "bottle-agent running"}, nil
+	return controlplane.Status{Ready: true, Survey: survey, GPSFix: gpsFix, Message: "bottle-agent running"}, nil
 }
 
 type provisionPayload struct{ RequestID string }
@@ -90,6 +92,31 @@ func (h *Handler) Survey(ctx context.Context, start bool, confirm bool) error {
 	h.mu.Unlock()
 	h.bus.Publish("info", "survey", "survey_"+action, map[string]any{"state": newState})
 	return nil
+}
+
+// SetGPSFix records the current GPS fix state and publishes a
+// gps_fix_acquired/gps_fix_lost event on each transition. Called by the
+// gpsd fix watcher wired in main.go.
+func (h *Handler) SetGPSFix(fix bool) {
+	h.mu.Lock()
+	changed := h.gpsFix != fix
+	h.gpsFix = fix
+	h.mu.Unlock()
+	if !changed {
+		return
+	}
+	kind := "gps_fix_lost"
+	if fix {
+		kind = "gps_fix_acquired"
+	}
+	h.bus.Publish("info", "gps", kind, map[string]any{"fix": fix})
+}
+
+// Shutdown publishes a power_button_shutdown event, then runs a clean
+// poweroff. Called by the GPIO power button watcher wired in main.go.
+func (h *Handler) Shutdown(ctx context.Context) error {
+	h.bus.Publish("warn", "power", "power_button_shutdown", map[string]any{})
+	return h.runner.Run(ctx, "systemctl poweroff")
 }
 
 func (h *Handler) Events(ctx context.Context, lastSequence uint64) (<-chan controlplane.Event, error) {
