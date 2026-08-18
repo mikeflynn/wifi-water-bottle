@@ -152,6 +152,31 @@ gpsd address reuses the existing default (`127.0.0.1:2947`, same as
   each fix-state transition, not on every gpsd report) and
   `power_button_shutdown`.
 
+## bottle-tui changes
+
+`GPSFix` needs to thread through the same path `Survey` already takes from
+the agent's `Status()` reply to the dashboard, in `bottle-tui`:
+
+- `internal/controlplane/client.go`: `Status` struct gains
+  `GPSFix bool `json:"gps_fix"`` (alongside `Ready`/`Survey`/`Message`).
+- `internal/model/events.go`: `StatusSnapshot` gains `GPSFix bool`.
+- `internal/controlplane/eventstream.go`: `FetchStatus` copies
+  `status.GPSFix` into the `StatusSnapshot` it returns, same as it does for
+  `Survey` today.
+- `internal/tui/dashboard.go`: `render` gains a line, e.g.
+  `styleLabel.Render("gps:     ") + gpsFixLine`, where `gpsFixLine` is
+  something like `styleSuccess.Render("locked")` /
+  `styleDim.Render("no fix")`, mirroring how `readyLine` is chosen from
+  `m.status.Ready`.
+
+This reuses the existing periodic-refresh path (`model.Client.Consume`
+calling `FetchStatus` on resync/refresh) — same mechanism `Survey` already
+relies on for the dashboard. The `gps_fix_acquired`/`gps_fix_lost` bus
+events from the agent side land in the normal event log/stream for
+visibility there too, but wiring them into an instant (sub-poll-interval)
+dashboard update is not required, since `Survey` doesn't get that treatment
+either today.
+
 ## Error handling
 
 - Missing/unopenable GPIO hardware (`/dev/gpiochip*` absent, line busy,
@@ -180,6 +205,8 @@ gpsd address reuses the existing default (`127.0.0.1:2947`, same as
 
 - Powering the Pi back on via GPIO (requires power-latching hardware not
   present in this setup).
-- Any UI changes in `bottle-tui` to *display* `GPSFix`/the new events — this
-  design only adds them to the wire protocol; consuming them in the TUI is a
-  separate follow-up if wanted.
+- Surfacing the new `gps_fix_acquired`/`gps_fix_lost`/`power_button_shutdown`
+  bus events as anything more than normal event-log entries in `bottle-tui`
+  (e.g. toasts, dedicated notification styling) — they show up like any
+  other event; special-casing their presentation is a separate follow-up if
+  wanted.
