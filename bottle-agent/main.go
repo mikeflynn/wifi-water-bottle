@@ -72,20 +72,39 @@ type gpioConfig struct {
 	ledPin     int
 }
 
-func loadGPIOConfig() (gpioConfig, error) {
-	buttonPin, err := strconv.Atoi(envOr("BOTTLE_AGENT_BUTTON_PIN", "17"))
+const (
+	defaultGPIOChip      = "gpiochip0"
+	defaultButtonPin     = 17
+	defaultLEDPin        = 27
+	defaultButtonHoldStr = "2s"
+)
+
+// loadGPIOConfig reads the GPIO env var overrides. A malformed value for a
+// given var falls back to that var's default and is logged by the caller
+// (via the returned per-field warnings) rather than treated as fatal — a
+// typo in one env var must never prevent the rest of bottle-agent (control
+// plane, tunnel) from starting. loadGPIOConfig never returns an error; the
+// second return value collects human-readable descriptions of any values
+// that fell back, for the caller to log.
+func loadGPIOConfig() (gpioConfig, []string) {
+	var warnings []string
+
+	buttonPin, err := strconv.Atoi(envOr("BOTTLE_AGENT_BUTTON_PIN", strconv.Itoa(defaultButtonPin)))
 	if err != nil {
-		return gpioConfig{}, fmt.Errorf("parse BOTTLE_AGENT_BUTTON_PIN: %w", err)
+		warnings = append(warnings, fmt.Sprintf("BOTTLE_AGENT_BUTTON_PIN invalid (%v), using default %d", err, defaultButtonPin))
+		buttonPin = defaultButtonPin
 	}
-	ledPin, err := strconv.Atoi(envOr("BOTTLE_AGENT_LED_PIN", "27"))
+	ledPin, err := strconv.Atoi(envOr("BOTTLE_AGENT_LED_PIN", strconv.Itoa(defaultLEDPin)))
 	if err != nil {
-		return gpioConfig{}, fmt.Errorf("parse BOTTLE_AGENT_LED_PIN: %w", err)
+		warnings = append(warnings, fmt.Sprintf("BOTTLE_AGENT_LED_PIN invalid (%v), using default %d", err, defaultLEDPin))
+		ledPin = defaultLEDPin
 	}
-	hold, err := time.ParseDuration(envOr("BOTTLE_AGENT_BUTTON_HOLD", "2s"))
+	hold, err := time.ParseDuration(envOr("BOTTLE_AGENT_BUTTON_HOLD", defaultButtonHoldStr))
 	if err != nil {
-		return gpioConfig{}, fmt.Errorf("parse BOTTLE_AGENT_BUTTON_HOLD: %w", err)
+		warnings = append(warnings, fmt.Sprintf("BOTTLE_AGENT_BUTTON_HOLD invalid (%v), using default %s", err, defaultButtonHoldStr))
+		hold, _ = time.ParseDuration(defaultButtonHoldStr)
 	}
-	return gpioConfig{chip: "gpiochip0", buttonPin: buttonPin, buttonHold: hold, ledPin: ledPin}, nil
+	return gpioConfig{chip: defaultGPIOChip, buttonPin: buttonPin, buttonHold: hold, ledPin: ledPin}, warnings
 }
 
 func main() {
@@ -176,9 +195,9 @@ func startService(ctx context.Context, p paths) (*controlplane.Server, error) {
 	bus := eventbus.New(0)
 	handler := agent.New(provisioner, h, bus)
 
-	gpioCfg, err := loadGPIOConfig()
-	if err != nil {
-		return nil, fmt.Errorf("load gpio config: %w", err)
+	gpioCfg, gpioWarnings := loadGPIOConfig()
+	for _, w := range gpioWarnings {
+		log.Printf("gpio: %s", w)
 	}
 	wireGPIO(ctx, gpioCfg, handler)
 

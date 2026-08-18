@@ -164,9 +164,9 @@ func TestRunServiceCommandRejectsExtraArgs(t *testing.T) {
 }
 
 func TestLoadGPIOConfigDefaults(t *testing.T) {
-	cfg, err := loadGPIOConfig()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	cfg, warnings := loadGPIOConfig()
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
 	}
 	if cfg.buttonPin != 17 || cfg.ledPin != 27 || cfg.buttonHold != 2*time.Second {
 		t.Fatalf("unexpected defaults: %+v", cfg)
@@ -178,18 +178,46 @@ func TestLoadGPIOConfigReadsEnvOverrides(t *testing.T) {
 	t.Setenv("BOTTLE_AGENT_LED_PIN", "6")
 	t.Setenv("BOTTLE_AGENT_BUTTON_HOLD", "500ms")
 
-	cfg, err := loadGPIOConfig()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	cfg, warnings := loadGPIOConfig()
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
 	}
 	if cfg.buttonPin != 5 || cfg.ledPin != 6 || cfg.buttonHold != 500*time.Millisecond {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 }
 
-func TestLoadGPIOConfigRejectsInvalidPin(t *testing.T) {
+// TestLoadGPIOConfigFallsBackToDefaultOnInvalidPin proves a single malformed
+// env var falls back to its default rather than making loadGPIOConfig fail
+// entirely — a config typo must never prevent bottle-agent's control plane
+// and tunnel from starting (see startService's use of loadGPIOConfig).
+func TestLoadGPIOConfigFallsBackToDefaultOnInvalidPin(t *testing.T) {
 	t.Setenv("BOTTLE_AGENT_BUTTON_PIN", "not-a-number")
-	if _, err := loadGPIOConfig(); err == nil {
-		t.Fatal("expected an error for an invalid button pin")
+	t.Setenv("BOTTLE_AGENT_LED_PIN", "9")
+
+	cfg, warnings := loadGPIOConfig()
+	if cfg.buttonPin != 17 {
+		t.Fatalf("expected buttonPin to fall back to default 17, got %d", cfg.buttonPin)
+	}
+	if cfg.ledPin != 9 {
+		t.Fatalf("expected valid ledPin override to still be honored, got %d", cfg.ledPin)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "BOTTLE_AGENT_BUTTON_PIN") {
+		t.Fatalf("expected exactly one warning mentioning BOTTLE_AGENT_BUTTON_PIN, got %v", warnings)
+	}
+}
+
+// TestLoadGPIOConfigFallsBackToDefaultOnInvalidHold covers the duration
+// field specifically, since it uses a different parser (time.ParseDuration)
+// than the two pin fields (strconv.Atoi).
+func TestLoadGPIOConfigFallsBackToDefaultOnInvalidHold(t *testing.T) {
+	t.Setenv("BOTTLE_AGENT_BUTTON_HOLD", "not-a-duration")
+
+	cfg, warnings := loadGPIOConfig()
+	if cfg.buttonHold != 2*time.Second {
+		t.Fatalf("expected buttonHold to fall back to default 2s, got %v", cfg.buttonHold)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "BOTTLE_AGENT_BUTTON_HOLD") {
+		t.Fatalf("expected exactly one warning mentioning BOTTLE_AGENT_BUTTON_HOLD, got %v", warnings)
 	}
 }
