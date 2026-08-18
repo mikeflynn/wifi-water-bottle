@@ -121,6 +121,11 @@ func (m dashboardModel) View() string {
 	out := styleLabel.Render("pi:      ") + controlplane.PiAddress + "\n"
 	out += styleLabel.Render("state:   ") + readyLine + "\n"
 	out += styleLabel.Render("survey:  ") + m.status.Survey + "\n"
+	gpsLine := styleDim.Render("no fix")
+	if m.status.GPSFix {
+		gpsLine = styleSuccess.Render("locked")
+	}
+	out += styleLabel.Render("gps:     ") + gpsLine + "\n"
 	if m.status.Message != "" {
 		out += styleLabel.Render("message: ") + m.status.Message + "\n"
 	}

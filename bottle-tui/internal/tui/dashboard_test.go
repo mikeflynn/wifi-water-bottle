@@ -49,6 +49,28 @@ func TestDashboardStatusResultRendersSurveyState(t *testing.T) {
 	}
 }
 
+func TestDashboardStatusResultRendersGPSFix(t *testing.T) {
+	m := newDashboardModel(testEngine())
+	updated, _ := m.Update(statusResultMsg{status: controlplane.Status{Ready: true, Survey: "idle", GPSFix: true}})
+	updated.haveFetch = true
+	updated.paired = true
+	view := updated.View()
+	if !strings.Contains(view, "locked") {
+		t.Fatalf("expected gps locked state in view: %s", view)
+	}
+}
+
+func TestDashboardStatusResultRendersNoGPSFix(t *testing.T) {
+	m := newDashboardModel(testEngine())
+	updated, _ := m.Update(statusResultMsg{status: controlplane.Status{Ready: true, Survey: "idle", GPSFix: false}})
+	updated.haveFetch = true
+	updated.paired = true
+	view := updated.View()
+	if !strings.Contains(view, "no fix") {
+		t.Fatalf("expected no-fix state in view: %s", view)
+	}
+}
+
 func TestDashboardRefreshRequiresPairing(t *testing.T) {
 	m := newDashboardModel(testEngine())
 	m.paired = false
