@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"os"
 	"path/filepath"
@@ -112,7 +113,7 @@ func TestDoSetupReusesExistingCAForAdditionalProfiles(t *testing.T) {
 
 func TestStartServiceFailsClearlyBeforeSetupHasRun(t *testing.T) {
 	p := testPaths(t)
-	if _, err := startService(p); err == nil || !strings.Contains(err.Error(), "bottle-agent setup") {
+	if _, err := startService(context.Background(), p); err == nil || !strings.Contains(err.Error(), "bottle-agent setup") {
 		t.Fatalf("expected a clear \"run setup first\" error, got %v", err)
 	}
 }
@@ -130,7 +131,10 @@ func TestStartServiceLoadsValidPKI(t *testing.T) {
 		t.Fatalf("doSetup() error = %v", err)
 	}
 
-	_, err := startService(p)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel) // stops the gpsd fix-watcher goroutine wireGPIO starts
+
+	_, err := startService(ctx, p)
 	if err == nil {
 		t.Fatalf("expected startService to fail in this sandbox (no 10.77.0.1 interface), but it succeeded")
 	}
